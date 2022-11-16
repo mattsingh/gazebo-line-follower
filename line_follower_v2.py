@@ -48,20 +48,28 @@ class Follower:
 
 	def image_callback(self, msg):
 		image = self.bridge.imgmsg_to_cv2(msg,desired_encoding='bgr8')
-		self.latest_image = image
-		cv.imshow("camera_window", image)
+		self.latest_image = self.crop_image(image)
+		cv.imshow("camera_window", self.latest_image)
 		cv.waitKey(3)
 	
 	def draw_contour(self):
 		self.__wait_for_image_initialization()
 		contour, contour_x, contour_y = self.find_largest_line_contour(self.latest_image)
-		print(contour)
+		print(contour_x, contour_y)
 		if contour is not None:
 			contour_img = self.latest_image.copy()
-			cv.drawContours(contour_img, contour, -1, (0, 255, 0), 3)
+			# draw contour lines
+			cv.line(contour_img, (contour_x, 0), (contour_x, 480), (255, 0, 0), 3)
+			cv.line(contour_img, (0, contour_y), (640, contour_y), (255, 0, 0), 3)
+			cv.drawContours(contour_img, contour, -1, (0, 255, 0), 1)
 			cv.imshow("contour_window", contour_img)
 			cv.waitKey(3)
 			Timer(1.0 / DRAW_CONTOUR_FREQUENCY_HZ, self.draw_contour).start()
+
+	def crop_image(self, image):
+		'''Crop image to only show the bottom half of the image'''
+		height, width, channels = image.shape
+		return image[int(height/2):height, 0:width]
 
 if __name__ == "__main__":
 	rospy.init_node('follower')
