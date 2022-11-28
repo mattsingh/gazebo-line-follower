@@ -5,26 +5,62 @@ import numpy as np
 import rospy
 from sensor_msgs.msg import Image
 from threading import Timer
+from geometry_msgs.msg import Twist
 
 DRAW_CONTOUR_FREQUENCY_HZ = 5
 
 class Follower:
 	def __init__(self):
 		self.latest_image = None
+		self.line_coordinates = None
 		self.bridge = cv_bridge.CvBridge()
 		self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.image_callback)
 
 		cv.namedWindow("camera_window", cv.WINDOW_NORMAL)
 		cv.namedWindow("contour_window", cv.WINDOW_NORMAL)
 		
+		# Start a timer to periodically draw the contour
 		Timer(1.0 / DRAW_CONTOUR_FREQUENCY_HZ, self.draw_contour).start()
+		self.drive_robot()
 		rospy.spin()
-	
+
+	def drive_robot(self):
+		'''Drive the robot based on the line coordinates'''
+		pub = rospy.Publisher('/cmd_vel', Twist, queue_size=1)
+		rate = rospy.Rate(10)
+
+		straight_twist = Twist()
+		straight_twist.linear.x = 0.2
+
+		left_twist = Twist()
+		left_twist.linear.x = 0.2
+		left_twist.angular.z = 0.2
+
+		right_twist = Twist()
+		right_twist.linear.x = 0.2
+		right_twist.angular.z = -0.2
+
+		self.__wait_for_image_initialization()
+		while not rospy.is_shutdown():
+			if self.line_coordinates is not None:
+				x, y = self.line_coordinates
+				if x < 200:
+					print("turn left")
+					pub.publish(left_twist)
+				elif x > 440:
+					print("turn right")
+					pub.publish(right_twist)
+				else:
+					print("go straight")
+					pub.publish(straight_twist)
+
+			rate.sleep()
+
 	def __wait_for_image_initialization(self):
 		while self.latest_image is None:
 			time.sleep(.01)
 
-	def find_largest_line_contour(self, image):
+	def __find_largest_line_contour(self, image):
 		# convert to grayscale
 		gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
 		# apply gaussian blur
@@ -54,7 +90,8 @@ class Follower:
 	
 	def draw_contour(self):
 		self.__wait_for_image_initialization()
-		contour, contour_x, contour_y = self.find_largest_line_contour(self.latest_image)
+		contour, contour_x, contour_y = self.__find_largest_line_contour(self.latest_image)
+		self.line_coordinates = (contour_x, contour_y)
 		print(contour_x, contour_y)
 		if contour is not None:
 			contour_img = self.latest_image.copy()
@@ -72,6 +109,6 @@ class Follower:
 		return image[int(height/2):height, 0:width]
 
 if __name__ == "__main__":
-	rospy.init_node('follower')
+	rospy.init_node('line_follower')
 	follower = Follower()
 
