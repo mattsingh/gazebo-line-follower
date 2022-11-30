@@ -8,6 +8,8 @@ from threading import Timer, Thread
 from geometry_msgs.msg import Twist
 
 DRAW_CONTOUR_FREQUENCY_HZ = 5
+IMAGE_LEFT_THRESHOLD = 200
+IMAGE_RIGHT_THRESHOLD = 440
 
 class Follower:
 	def __init__(self):
@@ -21,7 +23,7 @@ class Follower:
 		self.image_sub = rospy.Subscriber('/camera/rgb/image_raw', Image, self.image_callback)
 
 		cv.namedWindow("camera_window", cv.WINDOW_NORMAL)
-		cv.namedWindow("contour_window", cv.WINDOW_NORMAL)
+		cv.namedWindow("robot_vision_window", cv.WINDOW_NORMAL)
 		
 		# Start a timer to periodically draw the contour
 		self.contour_drawer_thread.start()
@@ -50,10 +52,10 @@ class Follower:
 		while not rospy.is_shutdown():
 			if self.line_coordinates is not None:
 				x, y = self.line_coordinates
-				if x < 200:
+				if x < IMAGE_LEFT_THRESHOLD:
 					print("turn left")
 					pub.publish(left_twist)
-				elif x > 440:
+				elif x > IMAGE_RIGHT_THRESHOLD:
 					print("turn right")
 					pub.publish(right_twist)
 				else:
@@ -110,11 +112,11 @@ class Follower:
 		# draw contour lines
 		cv.circle(contour_img, (contour_x, contour_y), 5, (0, 0, 255), -1)
 		# draw vertical line
-		cv.line(contour_img, (200, 0), (200, 480), (255, 0, 0), 5)
-		cv.line(contour_img, (440, 0), (440, 480), (255, 0, 0), 5)
+		cv.line(contour_img, (IMAGE_LEFT_THRESHOLD, 0), (IMAGE_LEFT_THRESHOLD, 480), (255, 0, 0), 5)
+		cv.line(contour_img, (IMAGE_RIGHT_THRESHOLD, 0), (IMAGE_RIGHT_THRESHOLD, 480), (255, 0, 0), 5)
 
 		cv.drawContours(contour_img, contour, -1, (0, 255, 0), 1)
-		cv.imshow("contour_window", contour_img)
+		cv.imshow("robot_vision_window", contour_img)
 		cv.waitKey(3)
 
 	def crop_image(self, image):
