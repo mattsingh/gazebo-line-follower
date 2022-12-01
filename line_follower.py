@@ -1,3 +1,4 @@
+import math
 import time
 import cv2 as cv
 import cv_bridge
@@ -11,12 +12,14 @@ DRAW_CONTOUR_FREQUENCY_HZ = 5
 DRAW_SIGN_FREQUENCY_HZ = 5
 IMAGE_LEFT_THRESHOLD = 200
 IMAGE_RIGHT_THRESHOLD = 440
+STOP_SIGN_SIZE = 144
 
 class Follower:
 	def __init__(self):
 		self.latest_image = None
 		self.latest_image_cropped = None
 		self.line_coordinates = None
+		self.stop_sign_detected = False
 
 		self.driver_thread = Thread(target=self.drive_robot)
 		self.line_contour_thread = Thread(target=self.find_line_contour)
@@ -31,7 +34,8 @@ class Follower:
 		
 		# Start a timer to periodically draw the contour
 		self.line_contour_thread.start()
-		# self.driver_thread.start()
+		self.sign_contour_thread.start()
+		self.driver_thread.start()
 		rospy.spin()
 
 	def drive_robot(self):
@@ -52,8 +56,24 @@ class Follower:
 
 		stop_twist = Twist()
 
+		turn_around_twist = Twist()
+		turn_around_twist.linear.x = 0.1
+		turn_around_twist.angular.z = math.radians(180) / 2
+
 		self.__wait_for_image_initialization()
 		while not rospy.is_shutdown():
+			if self.stop_sign_detected:
+				print("stopping")
+				# turn 180 degrees
+				print("turning around")
+				# publish twist for 2 seconds
+				t0 = rospy.Time.now().to_sec()
+				while not rospy.is_shutdown() and rospy.Time.now().to_sec() - t0 < 2:
+					pub.publish(turn_around_twist)
+					rate.sleep()
+				print("done")
+				# Reset stop sign flag
+				self.stop_sign_detected = False
 			if self.line_coordinates is not None:
 				x, y = self.line_coordinates
 				if x < IMAGE_LEFT_THRESHOLD:
@@ -83,13 +103,15 @@ class Follower:
 		image, contours, heirarchy = cv.findContours(mask, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE)
 
 		if len(contours) > 0:
-			largest_contour = max(contours, key=cv.contourArea)
-			moments = cv.moments(largest_contour)
-
-			x = int(moments['m10'] / moments['m00'])
-			y = int(moments['m01'] / moments['m00'])
-
-			return largest_contour, x, y
+			try:
+				# find the biggest area
+				c = max(contours, key=cv.contourArea)
+				M = cv.moments(c)
+				cx = int(M['m10']/M['m00'])
+				cy = int(M['m01']/M['m00'])
+				return c, cx, cy
+			except:
+				return None, None, None
 		else:
 			return None, None, None
 
@@ -107,7 +129,6 @@ class Follower:
 		while not rospy.is_shutdown():
 			self.__wait_for_image_initialization()
 			contour, contour_x, contour_y = self.__find_largest_line_contour(self.latest_image_cropped)
-			print(contour_x, contour_y)
 			self.line_coordinates = (contour_x, contour_y)
 			if contour is not None:
 				self.draw_robot_perception(self.latest_image, contour, contour_x, contour_y)
@@ -117,9 +138,16 @@ class Follower:
 		'''Draw the contour of the sign'''
 		while not rospy.is_shutdown():
 			self.__wait_for_image_initialization()
-			x, y, w, h = self.__find_sign_contour(self.latest_image_cropped)
+			red_area, x, y, w, h = self.__find_sign_contour(self.latest_image)
+			print(w, h)
+			if w > STOP_SIGN_SIZE and h > STOP_SIGN_SIZE:
+				self.stop_sign_detected = True
+			image = self.latest_image.copy()
 			if x is not None:
-				self.draw_sign_detection(self.latest_image_cropped, x, y, w, h)
+				# Draw the sign detection
+				cv.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
+			cv.imshow("sign_vision_window", image)
+			cv.waitKey(3)
 			time.sleep(1.0 / DRAW_SIGN_FREQUENCY_HZ)
 
 	def __find_sign_contour(self, image):
@@ -133,15 +161,10 @@ class Follower:
 		if len(contours) > 0:
 			red_area = max(contours, key=cv.contourArea)
 			x, y, w, h = cv.boundingRect(red_area)
-			return x, y, w, h
+			return red_area, x, y, w, h
 		else:
-			return None, None, None, None
-
-	def draw_sign_detection(self, image, x, y, w, h):
-		'''Draw the sign detection'''
-		cv.boundingRect(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-		cv.imshow("sign_vision_window", image)
-		cv.waitKey(3)
+			return None, None, None, None, None
+		
 
 	def draw_robot_perception(self, image, contour, contour_x, contour_y):
 		contour_img = self.latest_image_cropped.copy()
